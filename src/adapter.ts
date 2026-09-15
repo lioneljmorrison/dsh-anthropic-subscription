@@ -12,6 +12,7 @@ export interface ClaudeAdapterConfig {
   executable: string
   cwd: string
   streamIdleTimeoutMs: number
+  maxPromptBytes: number
 }
 
 export class ClaudeAdapter extends LlmAdapter {

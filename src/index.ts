@@ -11,6 +11,7 @@ export interface Config {
   executable: string
   cwd: string
   streamIdleTimeoutMs: number
+  maxPromptBytes: number
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -18,6 +19,7 @@ export const Config: Schema<Config> = Schema.object({
   executable: Schema.string().default('claude'),
   cwd: Schema.string().default(process.cwd()),
   streamIdleTimeoutMs: Schema.number().min(1).max(MAX_TIMER_DELAY_MS).default(300_000),
+  maxPromptBytes: Schema.number().min(1_024).default(2_000_000),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -25,6 +27,7 @@ export function apply(ctx: Context, config: Config): void {
     executable: config.executable,
     cwd: config.cwd,
     streamIdleTimeoutMs: config.streamIdleTimeoutMs,
+    maxPromptBytes: config.maxPromptBytes,
   })
   ctx.effect(() => ctx.llm.registerAdapter([config.provider], adapter))
 }

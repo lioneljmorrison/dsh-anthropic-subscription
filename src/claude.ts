@@ -3,18 +3,26 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+import { createHash, randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
 import { LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
-import { renderPrompt } from './prompt.js'
+import { preparePrompt, systemText } from './prompt.js'
 
 export interface ClaudeRunConfig {
   executable: string
   cwd: string
   streamIdleTimeoutMs: number
+  maxPromptBytes: number
 }
 
 type JsonObject = Record<string, unknown>
+
+interface ClaudeReplayState {
+  transport: 'claude-cli-session'
+  sessionId: string
+  systemFingerprint: string
+}
 
 function object(value: unknown): JsonObject | undefined {
   return typeof value === 'object' && value !== null ? value as JsonObject : undefined
@@ -37,12 +45,50 @@ function finishKind(reason: unknown): 'stop' | 'max-tokens' | 'tool-calls' {
   return 'stop'
 }
 
+function replayState(value: unknown): ClaudeReplayState | undefined {
+  const candidate = object(object(value)?.response)
+  return candidate?.transport === 'claude-cli-session'
+    && typeof candidate.sessionId === 'string'
+    && typeof candidate.systemFingerprint === 'string'
+    ? { transport: 'claude-cli-session', sessionId: candidate.sessionId, systemFingerprint: candidate.systemFingerprint }
+    : undefined
+}
+
+function systemFingerprint(options: GenerateOptions): string {
+  return createHash('sha256').update(systemText(options) ?? '').digest('hex')
+}
+
+export function continuationRequest(options: GenerateOptions): {
+  options: GenerateOptions
+  sessionId: string | undefined
+  resume: boolean
+} {
+  if (options.sessionId === undefined) return { options, sessionId: undefined, resume: false }
+  const fingerprint = systemFingerprint(options)
+  for (let index = options.messages.length - 1; index >= 0; index -= 1) {
+    const message = options.messages[index]
+    if (message?.role !== 'assistant' || message.source.kind !== 'model') continue
+    const state = replayState(message.source.replayState)
+    if (state === undefined) continue
+    if (state.systemFingerprint !== fingerprint) break
+    const systemMessages = options.messages.filter(candidate => candidate.role === 'system')
+    return {
+      options: { ...options, messages: [...systemMessages, ...options.messages.slice(index + 1).filter(candidate => candidate.role !== 'system')] },
+      sessionId: state.sessionId,
+      resume: true,
+    }
+  }
+  return { options, sessionId: randomUUID(), resume: false }
+}
+
 /** Run one isolated Claude Code print-mode request and translate its JSONL stream. */
 export async function* runClaude(options: GenerateOptions, config: ClaudeRunConfig): AsyncIterable<StreamChunk> {
   if (options.stop !== undefined) {
     throw new LlmError('Claude CLI transport does not support stop sequences', 'UNSUPPORTED_OPTION')
   }
   options.signal?.throwIfAborted()
+  const continuation = continuationRequest(options)
+  const prepared = preparePrompt(continuation.options, config.maxPromptBytes)
   let bridgeRoot: string | undefined
   const args = [
     '--print',
@@ -50,10 +96,12 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
     '--verbose',
     '--include-partial-messages',
     '--permission-prompts', 'none',
-    '--no-session-persistence',
     '--model', options.model,
     '--max-turns', '1',
   ]
+  if (continuation.sessionId === undefined) args.push('--no-session-persistence')
+  else if (continuation.resume) args.push('--resume', continuation.sessionId)
+  else args.push('--session-id', continuation.sessionId)
   if (options.tools?.length) {
     bridgeRoot = await mkdtemp(join(tmpdir(), 'dsh-claude-mcp-'))
     const schemaPath = join(bridgeRoot, 'tools.json')
@@ -73,6 +121,12 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
   } else {
     args.push('--safe-mode', '--tools', '')
   }
+  if (prepared.system !== undefined) {
+    bridgeRoot ??= await mkdtemp(join(tmpdir(), 'dsh-claude-request-'))
+    const systemPath = join(bridgeRoot, 'system.txt')
+    await writeFile(systemPath, prepared.system, { mode: 0o600 })
+    args.push('--system-prompt-file', systemPath, '--system-prompt-snapshot', 'off')
+  }
   if (options.reasoningEffort !== undefined && options.reasoningEffort !== 'off') {
     args.push('--effort', String(options.reasoningEffort))
   }
@@ -91,7 +145,7 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
   child.stderr.on('data', chunk => { stderr = (stderr + String(chunk)).slice(-8192) })
   const abort = () => child.kill('SIGTERM')
   options.signal?.addEventListener('abort', abort, { once: true })
-  child.stdin.end(renderPrompt(options))
+  child.stdin.end(prepared.prompt)
 
   const blocks = new Map<number,
     | { type: 'text' | 'reasoning'; text: string }
@@ -194,7 +248,17 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
       throw new LlmError(resultError ?? `Claude CLI exited with code ${String(exitCode)}: ${stderr}`, 'PROVIDER_ERROR')
     }
     if (usage !== undefined) yield { type: 'usage', usage }
-    yield { type: 'finish', reason: { kind: finishKind(stopReason) } }
+    yield {
+      type: 'finish',
+      reason: { kind: finishKind(stopReason) },
+      ...(continuation.sessionId === undefined || toolCallsRequested ? {} : {
+        replayState: { response: {
+          transport: 'claude-cli-session',
+          sessionId: continuation.sessionId,
+          systemFingerprint: systemFingerprint(options),
+        } },
+      }),
+    }
   } finally {
     if (timer !== undefined) clearTimeout(timer)
     options.signal?.removeEventListener('abort', abort)

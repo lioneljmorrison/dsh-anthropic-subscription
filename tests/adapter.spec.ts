@@ -6,6 +6,7 @@ describe('ClaudeAdapter metadata', () => {
     executable: 'claude',
     cwd: '/tmp',
     streamIdleTimeoutMs: 1_000,
+    maxPromptBytes: 2_000_000,
   })
 
   it('advertises the subscription provider and model aliases', async () => {

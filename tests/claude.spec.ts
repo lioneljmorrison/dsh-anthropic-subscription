@@ -2,9 +2,9 @@ import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { runClaude } from '../src/claude.js'
+import { continuationRequest, runClaude } from '../src/claude.js'
 
 let root: string
 let executable: string
@@ -57,12 +57,56 @@ function request(model = 'sonnet', signal?: AbortSignal): GenerateOptions {
 }
 
 describe('runClaude', () => {
+  it('resumes from adapter replay state and sends only messages after that turn', () => {
+    const prior = createAssistantMessage({
+      content: [{ type: 'text', text: 'prior answer' }],
+      source: {
+        provider: 'claude-subscription',
+        model: 'sonnet',
+        replayState: { response: {
+          transport: 'claude-cli-session',
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          systemFingerprint: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        } },
+      },
+    })
+    const current = request()
+    current.sessionId = 'dsh-session' as GenerateOptions['sessionId']
+    current.messages = [createUserMessage({ content: [{ type: 'text', text: 'old turn' }], source: { kind: 'user' } }), prior, ...current.messages]
+    const continuation = continuationRequest(current)
+    expect(continuation.resume).toBe(true)
+    expect(continuation.sessionId).toBe('11111111-1111-4111-8111-111111111111')
+    expect(continuation.options.messages).toHaveLength(1)
+    expect(continuation.options.messages[0]?.content).toEqual([{ type: 'text', text: 'hello' }])
+  })
+
+  it('starts a fresh native session when system instructions change', () => {
+    const prior = createAssistantMessage({
+      content: [{ type: 'text', text: 'prior answer' }],
+      source: {
+        provider: 'claude-subscription', model: 'sonnet',
+        replayState: { response: {
+          transport: 'claude-cli-session', sessionId: '11111111-1111-4111-8111-111111111111',
+          systemFingerprint: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        } },
+      },
+    })
+    const current = request()
+    current.sessionId = 'dsh-session' as GenerateOptions['sessionId']
+    current.system = 'updated policy'
+    current.messages = [request().messages[0]!, prior, ...current.messages]
+    const continuation = continuationRequest(current)
+    expect(continuation.resume).toBe(false)
+    expect(continuation.options.messages).toHaveLength(3)
+    expect(continuation.sessionId).not.toBe('11111111-1111-4111-8111-111111111111')
+  })
+
   it('streams text, usage, and a terminal finish through the fake CLI', async () => {
     process.env.ANTHROPIC_API_KEY = 'must-not-reach-child'
     process.env.ANTHROPIC_AUTH_TOKEN = 'must-not-reach-child'
     try {
       const chunks: StreamChunk[] = []
-      for await (const chunk of runClaude(request(), { executable, cwd: root, streamIdleTimeoutMs: 5_000 })) chunks.push(chunk)
+      for await (const chunk of runClaude(request(), { executable, cwd: root, streamIdleTimeoutMs: 5_000, maxPromptBytes: 2_000_000 })) chunks.push(chunk)
       expect(chunks).toEqual([
         { type: 'block-start', index: 0, blockType: 'text' },
         { type: 'text-delta', index: 0, text: 'fake response' },
@@ -84,6 +128,7 @@ describe('runClaude', () => {
         executable,
         cwd: root,
         streamIdleTimeoutMs: 5_000,
+        maxPromptBytes: 2_000_000,
       })) { /* consume */ }
     }).rejects.toMatchObject({ failure: { code: 'ABORTED' } })
   })
@@ -92,12 +137,13 @@ describe('runClaude', () => {
     const chunks: StreamChunk[] = []
     const options = request()
     options.messages = [createUserMessage({ content: [{ type: 'text', text: 'USE_TOOL' }], source: { kind: 'user' } })]
+    options.sessionId = 'dsh-session' as GenerateOptions['sessionId']
     options.tools = [{
       name: 'echo_value',
       description: 'Echo a value',
       parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] },
     }]
-    for await (const chunk of runClaude(options, { executable, cwd: root, streamIdleTimeoutMs: 5_000 })) chunks.push(chunk)
+    for await (const chunk of runClaude(options, { executable, cwd: root, streamIdleTimeoutMs: 5_000, maxPromptBytes: 2_000_000 })) chunks.push(chunk)
     expect(chunks).toContainEqual({
       type: 'tool-call-delta',
       index: 0,
@@ -113,7 +159,7 @@ describe('runClaude', () => {
     options.messages = [createUserMessage({ content: [{ type: 'text', text: 'USE_EMPTY' }], source: { kind: 'user' } })]
     options.tools = [{ name: 'empty_tool', description: 'No arguments', parameters: { type: 'object', properties: {} } }]
     const chunks: StreamChunk[] = []
-    for await (const chunk of runClaude(options, { executable, cwd: root, streamIdleTimeoutMs: 5_000 })) chunks.push(chunk)
+    for await (const chunk of runClaude(options, { executable, cwd: root, streamIdleTimeoutMs: 5_000, maxPromptBytes: 2_000_000 })) chunks.push(chunk)
     expect(chunks).toContainEqual({
       type: 'tool-call-delta', index: 0, id: 'toolu_empty', name: 'empty_tool', argumentsDelta: '{}',
     })

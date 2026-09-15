@@ -5,6 +5,7 @@ const adapter = new ClaudeAdapter('claude-subscription', {
   executable: process.env.CLAUDE_PATH || 'claude',
   cwd: process.cwd(),
   streamIdleTimeoutMs: 60_000,
+  maxPromptBytes: 2_000_000,
 })
 
 let text = ''
