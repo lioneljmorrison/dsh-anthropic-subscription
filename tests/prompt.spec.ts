@@ -68,4 +68,17 @@ describe('conversation projection', () => {
   it('rejects a latest turn that cannot fit instead of silently truncating it', () => {
     expect(() => preparePrompt(options([user('x'.repeat(2_000))]), 1_024)).toThrow(/exceeds/)
   })
+
+  it('uses stable text-only projections for raw attachment blocks', () => {
+    const rendered = renderPrompt(options([createUserMessage({
+      content: [
+        { type: 'image', attachment: { attachmentId: 'a'.repeat(64), mediaType: 'image/png', bytes: 12, width: 2, height: 3, name: 'chart.png' } },
+        { type: 'file', attachment: { attachmentId: 'b'.repeat(64), name: 'notes.txt', bytes: 42 } },
+      ],
+      source: { kind: 'user' },
+    })]))
+    expect(rendered).toContain('image omitted because this model accepts text only')
+    expect(rendered).toContain('notes.txt')
+    expect(rendered).toContain('42 bytes')
+  })
 })

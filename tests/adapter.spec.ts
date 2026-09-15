@@ -12,6 +12,7 @@ describe('ClaudeAdapter metadata', () => {
   it('advertises the subscription provider and model aliases', async () => {
     expect(adapter.providerInfo()).toEqual({ id: 'claude-subscription', name: 'Anthropic Subscription' })
     expect((await adapter.listModels('claude-subscription')).map(model => model.id)).toEqual(['sonnet', 'opus', 'haiku'])
+    expect((await adapter.listModels('claude-subscription')).every(model => model.inputModalities?.join() === 'text')).toBe(true)
   })
 
   it('accepts full Claude model ids and rejects unrelated names', async () => {
