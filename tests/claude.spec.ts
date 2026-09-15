@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createAssistantMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { continuationRequest, runClaude } from '../src/claude.js'
+import { classifyClaudeFailure, continuationRequest, runClaude } from '../src/claude.js'
 
 let root: string
 let executable: string
@@ -57,6 +57,12 @@ function request(model = 'sonnet', signal?: AbortSignal): GenerateOptions {
 }
 
 describe('runClaude', () => {
+  it('classifies common CLI failures for DSH retry and routing policy', () => {
+    expect(classifyClaudeFailure('Please login again; authentication expired')).toBe('AUTHENTICATION')
+    expect(classifyClaudeFailure('weekly usage limit reached; try again later')).toBe('RATE_LIMIT')
+    expect(classifyClaudeFailure('unknown model claude-future')).toBe('UNKNOWN_MODEL')
+    expect(classifyClaudeFailure('unexpected subprocess failure')).toBe('PROVIDER_ERROR')
+  })
   it('resumes from adapter replay state and sends only messages after that turn', () => {
     const prior = createAssistantMessage({
       content: [{ type: 'text', text: 'prior answer' }],

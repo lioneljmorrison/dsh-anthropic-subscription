@@ -5,6 +5,8 @@ export interface ClaudeRunConfig {
     streamIdleTimeoutMs: number;
     maxPromptBytes: number;
 }
+/** Map common Claude CLI prose into DSH routing failures without inspecting credentials. */
+export declare function classifyClaudeFailure(message: string): 'AUTHENTICATION' | 'RATE_LIMIT' | 'UNKNOWN_MODEL' | 'PROVIDER_ERROR';
 export declare function continuationRequest(options: GenerateOptions): {
     options: GenerateOptions;
     sessionId: string | undefined;

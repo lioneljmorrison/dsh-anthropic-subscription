@@ -1,5 +1,8 @@
 # dsh-anthropic-subscription
 
+[![Tests](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/ci.yml/badge.svg)](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/codeql.yml/badge.svg)](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/codeql.yml)
+
 Local DeepSeek Harness model provider backed by the official Claude Code CLI and a
 Claude Pro or Max subscription.
 
@@ -38,6 +41,8 @@ image bytes reached Claude.
 ```sh
 pnpm test
 pnpm run typecheck
+pnpm run check:compat
+pnpm run coverage
 CLAUDE_PATH=/path/to/claude node scripts/smoke.mjs
 CLAUDE_PATH=/path/to/claude node scripts/tool-smoke.mjs
 CLAUDE_PATH=/path/to/claude node scripts/tool-roundtrip-smoke.mjs
@@ -49,6 +54,34 @@ CLAUDE_PATH=/path/to/claude node scripts/session-smoke.mjs
 - DeepSeek Harness `0.1.5-rc.1`
 - Claude Code available on the DSH service `PATH`
 - Claude Code authenticated to a Claude subscription
+
+## Install
+
+Install the published package into a DSH profile:
+
+```sh
+dsh plugin --profile web add dsh-anthropic-subscription
+```
+
+For a local checkout during development:
+
+```sh
+dsh plugin --profile web add file:/absolute/path/to/dsh-anthropic-subscription
+```
+
+Then restart the DSH service and select `Anthropic Subscription` in the model picker.
+Run `pnpm run check:compat` as the same account that runs DSH to verify the CLI flags
+and version visible to that service.
+
+## Releases
+
+Version tags are packaged and attached automatically by GitHub Actions. To publish a
+release from a clean checkout:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
 
 ## Configuration
 

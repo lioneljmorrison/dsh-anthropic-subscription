@@ -1,20 +1,36 @@
 {
   "name": "dsh-anthropic-subscription",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local DSH model provider backed by the official Claude Code CLI and a Claude subscription.",
-  "private": true,
+  "private": false,
   "type": "module",
   "license": "MIT",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "files": ["lib", "src", "cordis.patch.yml", "README.md", "LICENSE"],
+  "files": [
+    "lib",
+    "src",
+    "cordis.patch.yml",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "repository": { "type": "git", "url": "git+https://github.com/lioneljmorrison/dsh-anthropic-subscription.git" },
+  "bugs": { "url": "https://github.com/lioneljmorrison/dsh-anthropic-subscription/issues" },
+  "homepage": "https://github.com/lioneljmorrison/dsh-anthropic-subscription",
   "scripts": {
     "build": "node node_modules/typescript/bin/tsc -p tsconfig.build.json && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('lib/mcp-server.js', 0o755)\"",
     "prepack": "npm run build",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
-    "test": "npm run build && node node_modules/vitest/vitest.mjs run"
+    "test": "npm run build && node node_modules/vitest/vitest.mjs run",
+    "check:compat": "npm run build && node scripts/check-compat.mjs",
+    "coverage": "npm run build && node node_modules/vitest/vitest.mjs run --coverage"
   },
-  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
   "dependencies": {
     "@deepseek-ai/dsh-timeout": "0.1.5-rc.1",
     "@deepseek-ai/schemastery": "3.18.2"
@@ -30,9 +46,12 @@
     "@deepseek-ai/dsh-invariants": "0.1.5-rc.1",
     "@deepseek-ai/dsh-llm": "0.1.5-rc.1",
     "@types/node": "22.20.2",
+    "@vitest/coverage-v8": "4.1.11",
     "typescript": "5.9.3",
     "vite": "7.3.6",
     "vitest": "4.1.11"
   },
-  "engines": { "node": "^22.19.0 || >=24.0.0" }
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  }
 }

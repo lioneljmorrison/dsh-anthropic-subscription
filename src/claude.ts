@@ -45,6 +45,15 @@ function finishKind(reason: unknown): 'stop' | 'max-tokens' | 'tool-calls' {
   return 'stop'
 }
 
+/** Map common Claude CLI prose into DSH routing failures without inspecting credentials. */
+export function classifyClaudeFailure(message: string): 'AUTHENTICATION' | 'RATE_LIMIT' | 'UNKNOWN_MODEL' | 'PROVIDER_ERROR' {
+  const text = message.toLowerCase()
+  if (/log[ -]?in|login required|not authenticated|authentication|unauthorized|expired/.test(text)) return 'AUTHENTICATION'
+  if (/rate limit|rate_limit|too many requests|five-hour|weekly limit|usage limit|try again later/.test(text)) return 'RATE_LIMIT'
+  if (/unknown model|model .* not found|invalid model/.test(text)) return 'UNKNOWN_MODEL'
+  return 'PROVIDER_ERROR'
+}
+
 function replayState(value: unknown): ClaudeReplayState | undefined {
   const candidate = object(object(value)?.response)
   return candidate?.transport === 'claude-cli-session'
@@ -245,7 +254,8 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
     if (options.signal?.aborted) throw new LlmError('Claude request aborted by caller', 'ABORTED')
     if (timedOut) throw new LlmError(`Claude stream idle timeout after ${config.streamIdleTimeoutMs}ms`, 'TIMEOUT')
     if ((resultError !== undefined || exitCode !== 0) && !toolCallsRequested) {
-      throw new LlmError(resultError ?? `Claude CLI exited with code ${String(exitCode)}: ${stderr}`, 'PROVIDER_ERROR')
+      const message = resultError ?? `Claude CLI exited with code ${String(exitCode)}: ${stderr}`
+      throw new LlmError(message, classifyClaudeFailure(message))
     }
     if (usage !== undefined) yield { type: 'usage', usage }
     yield {
