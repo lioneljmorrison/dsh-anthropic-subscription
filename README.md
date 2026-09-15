@@ -1,7 +1,11 @@
 # dsh-anthropic-subscription
 
-[![Tests](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/ci.yml/badge.svg)](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/codeql.yml/badge.svg)](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/codeql.yml)
+[![GitHub release](https://img.shields.io/github/v/release/lioneljmorrison/dsh-anthropic-subscription?style=flat-square)](https://github.com/lioneljmorrison/dsh-anthropic-subscription/releases/latest)
+[![Tests](https://img.shields.io/github/actions/workflow/status/lioneljmorrison/dsh-anthropic-subscription/ci.yml?branch=main&style=flat-square&label=tests)](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/ci.yml)
+[![CodeQL](https://img.shields.io/github/actions/workflow/status/lioneljmorrison/dsh-anthropic-subscription/codeql.yml?branch=main&style=flat-square&label=CodeQL)](https://github.com/lioneljmorrison/dsh-anthropic-subscription/security/code-scanning)
+[![Coverage threshold](https://img.shields.io/badge/coverage-%E2%89%A570%25-brightgreen?style=flat-square)](https://github.com/lioneljmorrison/dsh-anthropic-subscription/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/lioneljmorrison/dsh-anthropic-subscription?style=flat-square)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%5E22.19.0%20%7C%7C%20%3E%3D24.0.0-339933?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 
 Local DeepSeek Harness model provider backed by the official Claude Code CLI and a
 Claude Pro or Max subscription.
