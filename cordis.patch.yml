@@ -1,0 +1,3 @@
+- insert:
+    - id: anthropic-subscription
+      name: dsh-anthropic-subscription
