@@ -30,7 +30,7 @@ export function renderPrompt(options: GenerateOptions): string {
   }
   parts.push(...options.messages.map(messageText))
   if (options.tools?.length) {
-    parts.push('<system-note>DSH tools are unavailable through this initial Claude CLI transport. Do not claim to have called them.</system-note>')
+    parts.push('<system-note>Tools are provided by the dsh MCP server. Use those tools when needed. Prior [tool call] and [tool result] records are authoritative transcript history from DSH.</system-note>')
   }
   return parts.join('\n\n')
 }

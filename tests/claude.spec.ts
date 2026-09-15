@@ -14,6 +14,21 @@ case " $* " in *" hang "*) exec sleep 60;; esac
 [ -z "$ANTHROPIC_API_KEY" ] || exit 9
 [ -z "$ANTHROPIC_AUTH_TOKEN" ] || exit 9
 prompt=$(cat)
+case "$prompt" in *USE_EMPTY*)
+  printf '%s\\n' \\
+    '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_empty","name":"mcp__dsh__empty_tool","input":{}}}}' \\
+    '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}' \\
+    '{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":1,"output_tokens":1}}}'
+  exit 0
+;; esac
+case "$prompt" in *USE_TOOL*)
+  printf '%s\\n' \\
+    '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_123","name":"mcp__dsh__echo_value","input":{}}}}' \\
+    '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"value\\":\\"hello\\"}"}}}' \\
+    '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}' \\
+    '{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":2,"output_tokens":4}}}'
+  exit 0
+;; esac
 case "$prompt" in *hello*) text='fake response';; *) text='unexpected prompt';; esac
 printf '%s\\n' \\
   '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}' \\
@@ -71,5 +86,36 @@ describe('runClaude', () => {
         streamIdleTimeoutMs: 5_000,
       })) { /* consume */ }
     }).rejects.toMatchObject({ failure: { code: 'ABORTED' } })
+  })
+
+  it('maps Claude MCP tool use into a terminal DSH tool call', async () => {
+    const chunks: StreamChunk[] = []
+    const options = request()
+    options.messages = [createUserMessage({ content: [{ type: 'text', text: 'USE_TOOL' }], source: { kind: 'user' } })]
+    options.tools = [{
+      name: 'echo_value',
+      description: 'Echo a value',
+      parameters: { type: 'object', properties: { value: { type: 'string' } }, required: ['value'] },
+    }]
+    for await (const chunk of runClaude(options, { executable, cwd: root, streamIdleTimeoutMs: 5_000 })) chunks.push(chunk)
+    expect(chunks).toContainEqual({
+      type: 'tool-call-delta',
+      index: 0,
+      id: 'toolu_123',
+      name: 'echo_value',
+      argumentsDelta: '{"value":"hello"}',
+    })
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'tool-calls' } })
+  })
+
+  it('emits valid empty JSON for an argumentless tool', async () => {
+    const options = request()
+    options.messages = [createUserMessage({ content: [{ type: 'text', text: 'USE_EMPTY' }], source: { kind: 'user' } })]
+    options.tools = [{ name: 'empty_tool', description: 'No arguments', parameters: { type: 'object', properties: {} } }]
+    const chunks: StreamChunk[] = []
+    for await (const chunk of runClaude(options, { executable, cwd: root, streamIdleTimeoutMs: 5_000 })) chunks.push(chunk)
+    expect(chunks).toContainEqual({
+      type: 'tool-call-delta', index: 0, id: 'toolu_empty', name: 'empty_tool', argumentsDelta: '{}',
+    })
   })
 })

@@ -9,7 +9,7 @@
   "types": "lib/index.d.ts",
   "files": ["lib", "src", "cordis.patch.yml", "README.md", "LICENSE"],
   "scripts": {
-    "build": "node node_modules/typescript/bin/tsc -p tsconfig.build.json",
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.build.json && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('lib/mcp-server.js', 0o755)\"",
     "prepack": "npm run build",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test": "npm run build && node node_modules/vitest/vitest.mjs run"

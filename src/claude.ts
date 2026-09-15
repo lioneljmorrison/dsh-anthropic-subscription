@@ -1,7 +1,11 @@
 import { spawn } from 'node:child_process'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createInterface } from 'node:readline'
+import { fileURLToPath } from 'node:url'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { LlmError } from '@deepseek-ai/dsh-llm'
+import { LlmError, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { renderPrompt } from './prompt.js'
 
 export interface ClaudeRunConfig {
@@ -27,8 +31,10 @@ function cleanEnvironment(): NodeJS.ProcessEnv {
   return env
 }
 
-function finishKind(reason: unknown): 'stop' | 'max-tokens' {
-  return reason === 'max_tokens' ? 'max-tokens' : 'stop'
+function finishKind(reason: unknown): 'stop' | 'max-tokens' | 'tool-calls' {
+  if (reason === 'max_tokens') return 'max-tokens'
+  if (reason === 'tool_use') return 'tool-calls'
+  return 'stop'
 }
 
 /** Run one isolated Claude Code print-mode request and translate its JSONL stream. */
@@ -37,18 +43,36 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
     throw new LlmError('Claude CLI transport does not support stop sequences', 'UNSUPPORTED_OPTION')
   }
   options.signal?.throwIfAborted()
+  let bridgeRoot: string | undefined
   const args = [
     '--print',
     '--output-format', 'stream-json',
     '--verbose',
     '--include-partial-messages',
-    '--safe-mode',
     '--permission-prompts', 'none',
-    '--tools', '',
     '--no-session-persistence',
     '--model', options.model,
     '--max-turns', '1',
   ]
+  if (options.tools?.length) {
+    bridgeRoot = await mkdtemp(join(tmpdir(), 'dsh-claude-mcp-'))
+    const schemaPath = join(bridgeRoot, 'tools.json')
+    const mcpPath = join(bridgeRoot, 'mcp.json')
+    await writeFile(schemaPath, JSON.stringify({ tools: options.tools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.parameters,
+    })) }), { mode: 0o600 })
+    await writeFile(mcpPath, JSON.stringify({ mcpServers: { dsh: {
+      type: 'stdio',
+      command: process.execPath,
+      args: [fileURLToPath(new URL('./mcp-server.js', import.meta.url)), schemaPath],
+    } } }), { mode: 0o600 })
+    args.push('--setting-sources', '', '--disable-slash-commands', '--no-chrome', '--strict-mcp-config', '--mcp-config', mcpPath)
+    args.push('--tools', options.tools.map(tool => `mcp__dsh__${tool.name}`).join(','))
+  } else {
+    args.push('--safe-mode', '--tools', '')
+  }
   if (options.reasoningEffort !== undefined && options.reasoningEffort !== 'off') {
     args.push('--effort', String(options.reasoningEffort))
   }
@@ -69,10 +93,14 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
   options.signal?.addEventListener('abort', abort, { once: true })
   child.stdin.end(renderPrompt(options))
 
-  const blocks = new Map<number, { type: 'text' | 'reasoning'; text: string }>()
+  const blocks = new Map<number,
+    | { type: 'text' | 'reasoning'; text: string }
+    | { type: 'tool-call'; id: ReturnType<typeof ToolCallId>; name: string; arguments: string; initialArguments: string }
+  >()
   let usage: { inputTokens: number; outputTokens: number } | undefined
   let stopReason: unknown = 'end_turn'
   let resultError: string | undefined
+  let toolCallsRequested = false
   let timer: NodeJS.Timeout | undefined
   let timedOut = false
   const resetTimer = () => {
@@ -102,7 +130,13 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
           const index = number(event.index)
           const content = object(event.content_block)
           const type = content?.type === 'thinking' ? 'reasoning' : content?.type === 'text' ? 'text' : undefined
-          if (type !== undefined) {
+          if (content?.type === 'tool_use' && typeof content.id === 'string' && typeof content.name === 'string') {
+            const name = content.name.startsWith('mcp__dsh__') ? content.name.slice('mcp__dsh__'.length) : content.name
+            const id = ToolCallId(content.id)
+            const initialArguments = object(content.input) === undefined ? '{}' : JSON.stringify(content.input)
+            blocks.set(index, { type: 'tool-call', id, name, arguments: '', initialArguments })
+            yield { type: 'block-start', index, blockType: 'tool-call' }
+          } else if (type !== undefined) {
             blocks.set(index, { type, text: '' })
             yield { type: 'block-start', index, blockType: type }
           }
@@ -113,7 +147,11 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
           const text = typeof delta?.text === 'string'
             ? delta.text
             : typeof delta?.thinking === 'string' ? delta.thinking : ''
-          if (block !== undefined && text.length > 0) {
+          const argumentsDelta = typeof delta?.partial_json === 'string' ? delta.partial_json : ''
+          if (block?.type === 'tool-call' && argumentsDelta.length > 0) {
+            block.arguments += argumentsDelta
+            yield { type: 'tool-call-delta', index, id: block.id, name: block.name, argumentsDelta }
+          } else if (block !== undefined && block.type !== 'tool-call' && text.length > 0) {
             block.text += text
             yield block.type === 'text'
               ? { type: 'text-delta', index, text }
@@ -123,11 +161,21 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
           const index = number(event.index)
           const block = blocks.get(index)
           if (block !== undefined) {
-            yield { type: 'block-end', index, block: { type: block.type, text: block.text } }
+            if (block.type === 'tool-call' && block.arguments.length === 0) {
+              block.arguments = block.initialArguments
+              yield { type: 'tool-call-delta', index, id: block.id, name: block.name, argumentsDelta: block.arguments }
+            }
+            yield block.type === 'tool-call'
+              ? { type: 'block-end', index, block: { type: 'tool-call', id: block.id, name: block.name, arguments: block.arguments } }
+              : { type: 'block-end', index, block: { type: block.type, text: block.text } }
           }
         } else if (event?.type === 'message_delta') {
           const delta = object(event.delta)
           stopReason = delta?.stop_reason
+          if (stopReason === 'tool_use') {
+            toolCallsRequested = true
+            child.kill('SIGTERM')
+          }
           const rawUsage = object(event.usage)
           usage = {
             inputTokens: number(rawUsage?.input_tokens) + number(rawUsage?.cache_creation_input_tokens) + number(rawUsage?.cache_read_input_tokens),
@@ -142,7 +190,7 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
     const exitCode = await exit
     if (options.signal?.aborted) throw new LlmError('Claude request aborted by caller', 'ABORTED')
     if (timedOut) throw new LlmError(`Claude stream idle timeout after ${config.streamIdleTimeoutMs}ms`, 'TIMEOUT')
-    if (resultError !== undefined || exitCode !== 0) {
+    if ((resultError !== undefined || exitCode !== 0) && !toolCallsRequested) {
       throw new LlmError(resultError ?? `Claude CLI exited with code ${String(exitCode)}: ${stderr}`, 'PROVIDER_ERROR')
     }
     if (usage !== undefined) yield { type: 'usage', usage }
@@ -151,5 +199,6 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
     if (timer !== undefined) clearTimeout(timer)
     options.signal?.removeEventListener('abort', abort)
     if (child.exitCode === null) child.kill('SIGTERM')
+    if (bridgeRoot !== undefined) await rm(bridgeRoot, { recursive: true, force: true })
   }
 }
