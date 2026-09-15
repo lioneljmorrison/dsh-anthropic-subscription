@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import Include from '@deepseek-ai/cordis-plugin-include'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
-import LlmRuntime from '@deepseek-ai/dsh-llm'
+import LlmRuntime, { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import * as plugin from '../lib/index.js'
 
 let root: string | undefined
@@ -22,13 +23,23 @@ afterEach(async () => {
 describe('DSH composition', () => {
   it('registers the Claude subscription provider and models', async () => {
     root = await mkdtemp(join(tmpdir(), 'dsh-anthropic-composition-'))
+    const fakeClaude = join(root, 'fake-claude')
+    await writeFile(fakeClaude, `#!/bin/sh
+cat >/dev/null
+printf '%s\\n' \\
+  '{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_composed","name":"mcp__dsh__echo_value","input":{}}}}' \\
+  '{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"value\\":\\"composed\\"}"}}}' \\
+  '{"type":"stream_event","event":{"type":"content_block_stop","index":0}}' \\
+  '{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"input_tokens":1,"output_tokens":2}}}'
+`)
+    await chmod(fakeClaude, 0o755)
     const configPath = join(root, 'cordis.yml')
     await writeFile(configPath, [
       "- name: '@deepseek-ai/dsh-llm'",
       "- name: 'dsh-anthropic-subscription'",
       '  config:',
       '    provider: claude-subscription',
-      '    executable: claude',
+      `    executable: '${fakeClaude}'`,
       `    cwd: '${root}'`,
       '',
     ].join('\n'))
@@ -53,5 +64,21 @@ describe('DSH composition', () => {
 
     expect(context.llm.listProviders()).toContainEqual({ id: 'claude-subscription', name: 'Anthropic Subscription' })
     expect((await context.llm.listModels('claude-subscription')).map(model => model.id)).toEqual(['sonnet', 'opus', 'haiku'])
+
+    const chunks: StreamChunk[] = []
+    for await (const chunk of context.llm.stream({
+      provider: 'claude-subscription',
+      model: 'sonnet',
+      messages: [createUserMessage({ content: [{ type: 'text', text: 'use echo' }], source: { kind: 'user' } })],
+      tools: [{
+        name: 'echo_value',
+        description: 'Echo a value',
+        parameters: { type: 'object', properties: { value: { type: 'string' } } },
+      }],
+    })) chunks.push(chunk)
+    expect(chunks).toContainEqual({
+      type: 'tool-call-delta', index: 0, id: 'toolu_composed', name: 'echo_value', argumentsDelta: '{"value":"composed"}',
+    })
+    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'tool-calls' } })
   })
 })
