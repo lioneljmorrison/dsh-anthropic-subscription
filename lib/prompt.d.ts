@@ -6,5 +6,5 @@ export interface PreparedPrompt {
 }
 export declare function systemText(options: GenerateOptions): string | undefined;
 /** Serialize complete DSH history as ordered JSONL records within a fixed request budget. */
-export declare function preparePrompt(options: GenerateOptions, maxPromptBytes: number): PreparedPrompt;
+export declare function preparePrompt(options: GenerateOptions, maxPromptBytes: number, maxToolResultBytes?: number): PreparedPrompt;
 export declare function renderPrompt(options: GenerateOptions): string;

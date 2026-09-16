@@ -24,18 +24,20 @@ picker. For tool-enabled turns, a per-request local MCP server advertises DSH's 
 schemas. Claude's streamed calls are translated back to DSH; the MCP server never
 executes them. DSH remains responsible for permissions, execution, and tool results.
 
-DSH remains the durable conversation store. On normal agent-loop requests, the plugin
-records Claude's native session ID after clean text turns in DSH replay metadata and
-resumes from that exact assistant turn on the next request. Tool-call turns deliberately
-do not create a replay checkpoint: Claude records an intercepted MCP call as denied, so
-the following turn rebuilds from DSH's authoritative call and result instead. New
-messages are sent as an ordered JSONL transcript. One-shot calls remain non-persistent.
+DSH remains the durable conversation store. On agent-loop requests, the plugin records
+Claude's native session ID after each successful turn—including tool-call turns—in DSH
+replay metadata and resumes from that exact assistant turn on the next request. The
+following request sends only the new tool result or user message; it does not rebuild
+the entire DSH transcript. New sessions still begin with an ordered JSONL transcript,
+and one-shot calls remain non-persistent.
 Changing system instructions are supplied through a private temporary file on every
 request, with Claude's system-prompt snapshot disabled.
 
-The default transport budget is 2,000,000 bytes. If DSH has not compacted before that
-limit, the plugin drops oldest complete user turns and marks the omission. It refuses
-to truncate the current turn. File references are normally projected by DSH to stable,
+The default transport budget is 600,000 bytes. Tool-call turns retain Claude's native
+session replay metadata, and tool output is bounded to 12,000 bytes per result before
+it is sent over the transport. If DSH has not compacted before that limit, the plugin
+drops oldest complete user turns and marks the omission. It refuses to truncate the
+current turn. File references are normally projected by DSH to stable,
 read-only handles. This CLI transport advertises text input, so DSH represents image
 attachments with its standard text-only placeholder rather than silently claiming the
 image bytes reached Claude.
@@ -95,5 +97,6 @@ git push origin v0.2.0
   config:
     provider: claude-subscription
     executable: claude
-    maxPromptBytes: 2000000
+    maxPromptBytes: 600000
+    maxToolResultBytes: 12000
 ```

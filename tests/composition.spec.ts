@@ -63,7 +63,15 @@ printf '%s\\n' \\
     await context.loader.await()
 
     expect(context.llm.listProviders()).toContainEqual({ id: 'claude-subscription', name: 'Anthropic Subscription' })
-    expect((await context.llm.listModels('claude-subscription')).map(model => model.id)).toEqual(['sonnet', 'opus', 'haiku'])
+    expect(context.llm.listConfigurableProviders()).toContainEqual({
+      provider: 'claude-subscription',
+      displayName: 'Anthropic Subscription',
+      settingsNs: 'dsh-anthropic-subscription',
+      settingsPath: [],
+    })
+    expect((await context.llm.listModels('claude-subscription')).map(model => model.id)).toContain('claude-fable-5-1')
+    expect((await context.llm.listModels('claude-subscription')).map(model => model.id)).toContain('claude-opus-4-8')
+    expect((await context.llm.listModels('claude-subscription')).map(model => model.id)).toContain('claude-sonnet-5')
 
     const chunks: StreamChunk[] = []
     for await (const chunk of context.llm.stream({

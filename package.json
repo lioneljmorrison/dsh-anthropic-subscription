@@ -7,6 +7,16 @@
   "license": "MIT",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/client.d.ts",
+      "default": "./lib/client.js"
+    }
+  },
   "files": [
     "lib",
     "src",
@@ -19,7 +29,7 @@
   "bugs": { "url": "https://github.com/lioneljmorrison/dsh-anthropic-subscription/issues" },
   "homepage": "https://github.com/lioneljmorrison/dsh-anthropic-subscription",
   "scripts": {
-    "build": "node node_modules/typescript/bin/tsc -p tsconfig.build.json && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('lib/mcp-server.js', 0o755)\"",
+    "build": "node node_modules/typescript/bin/tsc -p tsconfig.build.json && node scripts/build-client.mjs && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('lib/mcp-server.js', 0o755)\"",
     "prepack": "npm run build",
     "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
     "test": "npm run build && node node_modules/vitest/vitest.mjs run",
@@ -29,6 +39,10 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": ["@deepseek-ai/dsh-client-ui-settings-models"],
+      "platform": "web"
     }
   },
   "dependencies": {

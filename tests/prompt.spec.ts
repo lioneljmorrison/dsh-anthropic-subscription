@@ -69,6 +69,25 @@ describe('conversation projection', () => {
     expect(() => preparePrompt(options([user('x'.repeat(2_000))]), 1_024)).toThrow(/exceeds/)
   })
 
+  it('bounds tool output while retaining the beginning and end', () => {
+    const callId = ToolCallId('toolu_large')
+    const output = `BEGIN-${'x'.repeat(500)}-END`
+    const prepared = preparePrompt({
+      ...options([
+        user('inspect'),
+        createAssistantMessage({
+          content: [{ type: 'tool-call', id: callId, name: 'bash', arguments: '{}' }],
+          source: { provider: 'claude-subscription', model: 'sonnet' },
+        }),
+        createToolResultMessage({ callId, content: [{ type: 'text', text: output }], isError: false }),
+      ]),
+    }, 10_000, 120)
+    expect(prepared.prompt).toContain('BEGIN-')
+    expect(prepared.prompt).toContain('-END')
+    expect(prepared.prompt).toContain('output truncated')
+    expect(prepared.prompt.length).toBeLessThan(10_000)
+  })
+
   it('uses stable text-only projections for raw attachment blocks', () => {
     const rendered = renderPrompt(options([createUserMessage({
       content: [

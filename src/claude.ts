@@ -14,6 +14,7 @@ export interface ClaudeRunConfig {
   cwd: string
   streamIdleTimeoutMs: number
   maxPromptBytes: number
+  maxToolResultBytes?: number
 }
 
 type JsonObject = Record<string, unknown>
@@ -97,7 +98,7 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
   }
   options.signal?.throwIfAborted()
   const continuation = continuationRequest(options)
-  const prepared = preparePrompt(continuation.options, config.maxPromptBytes)
+  const prepared = preparePrompt(continuation.options, config.maxPromptBytes, config.maxToolResultBytes ?? 12_000)
   let bridgeRoot: string | undefined
   const args = [
     '--print',
@@ -105,6 +106,7 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
     '--verbose',
     '--include-partial-messages',
     '--permission-prompts', 'none',
+    '--permission-mode', 'dontAsk',
     '--model', options.model,
     '--max-turns', '1',
   ]
@@ -127,6 +129,7 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
     } } }), { mode: 0o600 })
     args.push('--setting-sources', '', '--disable-slash-commands', '--no-chrome', '--strict-mcp-config', '--mcp-config', mcpPath)
     args.push('--tools', options.tools.map(tool => `mcp__dsh__${tool.name}`).join(','))
+    args.push('--allowed-tools', options.tools.map(tool => `mcp__dsh__${tool.name}`).join(','))
   } else {
     args.push('--safe-mode', '--tools', '')
   }
@@ -261,7 +264,7 @@ export async function* runClaude(options: GenerateOptions, config: ClaudeRunConf
     yield {
       type: 'finish',
       reason: { kind: finishKind(stopReason) },
-      ...(continuation.sessionId === undefined || toolCallsRequested ? {} : {
+      ...(continuation.sessionId === undefined ? {} : {
         replayState: { response: {
           transport: 'claude-cli-session',
           sessionId: continuation.sessionId,

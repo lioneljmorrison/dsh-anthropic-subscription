@@ -5,6 +5,7 @@ export interface ClaudeAdapterConfig {
     cwd: string;
     streamIdleTimeoutMs: number;
     maxPromptBytes: number;
+    maxToolResultBytes?: number;
 }
 export declare class ClaudeAdapter extends LlmAdapter {
     private readonly provider;

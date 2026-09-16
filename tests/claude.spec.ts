@@ -157,7 +157,8 @@ describe('runClaude', () => {
       name: 'echo_value',
       argumentsDelta: '{"value":"hello"}',
     })
-    expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'tool-calls' } })
+    expect(chunks.at(-1)).toMatchObject({ type: 'finish', reason: { kind: 'tool-calls' } })
+    expect(chunks.at(-1)).toMatchObject({ replayState: { response: { transport: 'claude-cli-session' } } })
   })
 
   it('emits valid empty JSON for an argumentless tool', async () => {

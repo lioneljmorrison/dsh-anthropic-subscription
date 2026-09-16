@@ -19,11 +19,26 @@ export interface PreparedPrompt {
   omittedMessages: number
 }
 
-function blockWire(block: ContentBlock): WireBlock {
+function bounded(text: string, maxBytes: number): string {
+  if (Buffer.byteLength(text) <= maxBytes) return text
+  const marker = `\n[… output truncated to ${maxBytes} bytes …]\n`
+  const room = Math.max(0, maxBytes - Buffer.byteLength(marker))
+  const head = Math.ceil(room * 0.65)
+  let start = text.slice(0, head)
+  let end = text.slice(-Math.max(0, room - head))
+  while (Buffer.byteLength(`${start}${marker}${end}`) > maxBytes) {
+    end = end.slice(1)
+    if (Buffer.byteLength(`${start}${marker}${end}`) <= maxBytes) break
+    start = start.slice(0, -1)
+  }
+  return `${start}${marker}${end}`
+}
+
+function blockWire(block: ContentBlock, maxToolResultBytes: number): WireBlock {
   switch (block.type) {
     case 'text':
     case 'reasoning':
-      return { type: block.type, text: block.text }
+      return { type: block.type, text: block.type === 'reasoning' ? '' : block.text }
     case 'tool-call':
       return { type: 'tool-call', id: String(block.id), name: block.name, arguments: block.arguments }
     case 'tool-result':
@@ -31,7 +46,7 @@ function blockWire(block: ContentBlock): WireBlock {
         type: 'tool-result',
         toolCallId: String(block.toolCallId),
         isError: block.isError === true,
-        content: block.content.map(blockWire),
+        content: block.content.map(child => blockWire(child, maxToolResultBytes)),
       }
     case 'image':
       return { type: 'text', text: textOnlyImageText(block.attachment) }
@@ -42,8 +57,14 @@ function blockWire(block: ContentBlock): WireBlock {
   }
 }
 
-function messageWire(message: Message): string {
-  return JSON.stringify({ id: String(message.id), role: message.role, source: message.source.kind, content: message.content.map(blockWire) })
+function messageWire(message: Message, maxToolResultBytes: number): string {
+  const content = message.content.map(block => blockWire(block, maxToolResultBytes))
+  const boundedContent = message.source.kind === 'tool'
+    ? content.map(block => block.type === 'tool-result'
+      ? { ...block, content: block.content.map(child => child.type === 'text' ? { ...child, text: bounded(child.text, maxToolResultBytes) } : child) }
+      : block)
+    : content
+  return JSON.stringify({ id: String(message.id), role: message.role, source: message.source.kind, content: boundedContent })
 }
 
 function promptFor(lines: readonly string[], omittedMessages: number): string {
@@ -65,13 +86,13 @@ export function systemText(options: GenerateOptions): string | undefined {
 }
 
 /** Serialize complete DSH history as ordered JSONL records within a fixed request budget. */
-export function preparePrompt(options: GenerateOptions, maxPromptBytes: number): PreparedPrompt {
+export function preparePrompt(options: GenerateOptions, maxPromptBytes: number, maxToolResultBytes = 12_000): PreparedPrompt {
   const system = systemText(options)
   const groups: string[][] = []
   for (const message of options.messages.filter(message => message.role !== 'system')) {
     const startsTurn = message.role === 'user' && message.source.kind !== 'tool'
     if (startsTurn || groups.length === 0) groups.push([])
-    groups.at(-1)?.push(messageWire(message))
+    groups.at(-1)?.push(messageWire(message, maxToolResultBytes))
   }
   let omittedMessages = 0
   let prompt = promptFor(groups.flat(), omittedMessages)
