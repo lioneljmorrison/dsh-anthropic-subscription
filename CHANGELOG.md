@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## [0.3.0] - 2026-09-16
+
 - Prevent unbounded Anthropic prompt growth during long-running conversations by bounding prompt and tool-result payloads.
 - Reuse Claude CLI native sessions across tool turns and avoid replaying provider reasoning into subsequent prompts.
 - Restrict Claude CLI permissions and expose only the DSH MCP tools required by the active request.

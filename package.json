@@ -1,6 +1,6 @@
 {
   "name": "dsh-anthropic-subscription",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local DSH model provider backed by the official Claude Code CLI and a Claude subscription.",
   "private": false,
   "type": "module",
